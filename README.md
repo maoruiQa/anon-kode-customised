@@ -34,11 +34,18 @@ pnpm run dev
 pnpm run build
 ```
 
+the you can run it in any directory:
+
+```
+kode
+
+```
+
+
 Get some more logs while debugging:
 ```
 NODE_ENV=development pnpm run dev --verbose --debug
 ```
-
 
 
 
