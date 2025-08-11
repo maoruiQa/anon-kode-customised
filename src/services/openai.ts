@@ -280,12 +280,11 @@ export async function getCompletion(
 
   try {
     if (opts.stream) {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
       const response = await fetch(`${baseURL}/chat/completions`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({ ...opts, stream: true }),
         dispatcher: proxy,
       })
@@ -356,12 +355,11 @@ export async function getCompletion(
       })()
     }
     
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
     const response = await fetch(`${baseURL}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(opts),
       dispatcher: proxy,
     })

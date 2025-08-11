@@ -66,13 +66,13 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
   const exitState = useExitOnCtrlCD(() => process.exit(0))
   
   // Screen navigation stack
-  const [screenStack, setScreenStack] = useState<Array<'modelType' | 'provider' | 'apiKey' | 'model' | 'modelParams' | 'confirmation'>>(['modelType'])
+  const [screenStack, setScreenStack] = useState<Array<'modelType' | 'provider' | 'baseURL' | 'apiKey' | 'model' | 'modelParams' | 'confirmation'>>(['modelType'])
   
   // Current screen is always the last item in the stack
   const currentScreen = screenStack[screenStack.length - 1]
   
   // Function to navigate to a new screen
-  const navigateTo = (screen: 'modelType' | 'provider' | 'apiKey' | 'model' | 'modelParams' | 'confirmation') => {
+  const navigateTo = (screen: 'modelType' | 'provider' | 'baseURL' | 'apiKey' | 'model' | 'modelParams' | 'confirmation') => {
     setScreenStack(prev => [...prev, screen])
   }
   
@@ -93,6 +93,7 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
   )
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [apiKey, setApiKey] = useState<string>('')
+  const [baseURL, setBaseURL] = useState<string>(config.largeModelBaseURL || config.smallModelBaseURL || '')
   
   // New state for model parameters
   const [maxTokens, setMaxTokens] = useState<string>(
@@ -116,6 +117,8 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
   const [modelSearchCursorOffset, setModelSearchCursorOffset] = useState<number>(0)
   const [cursorOffset, setCursorOffset] = useState<number>(0)
   const [apiKeyEdited, setApiKeyEdited] = useState<boolean>(false)
+  const [baseUrlCursorOffset, setBaseUrlCursorOffset] = useState<number>(baseURL.length)
+  const [modelNameCursorOffset, setModelNameCursorOffset] = useState<number>(0)
 
   // Model type options
   const modelTypeOptions = [
@@ -131,8 +134,9 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     { label: 'High - Slower responses, more thorough reasoning', value: 'high' }
   ]
   
-  // Get available providers from models.ts
-  const availableProviders = Object.keys(providers)
+  // Get available providers from models.ts (limit to supported list)
+  const allowedProviders: ProviderType[] = ['openai', 'openrouter', 'gemini', 'ollama', 'mistral', 'custom']
+  const availableProviders = Object.keys(providers).filter(p => allowedProviders.includes(p as ProviderType))
   
   // Create provider options with nice labels
   const providerOptions = availableProviders.map(provider => {
@@ -218,10 +222,9 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     const providerType = provider as ProviderType
     setSelectedProvider(providerType)
     
-    if (provider === 'custom') {
-      // For custom provider, save and exit
-      saveConfiguration(providerType, selectedModel || config.largeModelName || '')
-      onDone()
+    if (provider === 'custom' || provider === 'ollama') {
+      // For custom and ollama, collect baseURL first
+      navigateTo('baseURL')
     } else {
       // For other providers, go to API key input
       navigateTo('apiKey')
@@ -260,6 +263,12 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     setModelLoadError(null)
     
     try {
+      if (selectedProvider === 'custom') {
+        // Skip remote listing for custom providers; proceed to manual model entry
+        setAvailableModels([])
+        navigateTo('model')
+        return []
+      }
       // For Gemini, use the separate fetchGeminiModels function
       if (selectedProvider === 'gemini') {
         const geminiModels = await fetchGeminiModels()
@@ -268,12 +277,14 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
         return geminiModels
       }
       
-      // For all other providers, use the OpenAI client
-      const baseURL = providers[selectedProvider]?.baseURL
+      // For OpenAI-compatible providers, compute baseURL (allow overriding for ollama via input)
+      const resolvedBaseURL = selectedProvider === 'ollama'
+        ? (baseURL || providers['ollama']?.baseURL)
+        : providers[selectedProvider]?.baseURL
 
       const openai = new OpenAI({
         apiKey: apiKey,
-        baseURL: baseURL,
+        baseURL: resolvedBaseURL,
         dangerouslyAllowBrowser: true
       })
       
@@ -350,7 +361,9 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
 
   
   function saveConfiguration(provider: ProviderType, model: string) {
-    const baseURL = providers[provider]?.baseURL || ""
+    const inferredBaseURL = (provider === 'custom' || provider === 'ollama')
+      ? baseURL
+      : (providers[provider]?.baseURL || "")
     
     // Create a new config object based on the existing one
     const newConfig = { ...config }
@@ -362,7 +375,7 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     // Update the appropriate model based on the selection
     if (modelTypeToChange === 'both' || modelTypeToChange === 'large') {
       newConfig.largeModelName = model
-      newConfig.largeModelBaseURL = baseURL
+      newConfig.largeModelBaseURL = inferredBaseURL
       newConfig.largeModelApiKey = apiKey || config.largeModelApiKey
       newConfig.largeModelMaxTokens = parseInt(maxTokens)
       
@@ -376,7 +389,7 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     
     if (modelTypeToChange === 'both' || modelTypeToChange === 'small') {
       newConfig.smallModelName = model
-      newConfig.smallModelBaseURL = baseURL
+      newConfig.smallModelBaseURL = inferredBaseURL
       newConfig.smallModelApiKey = apiKey || config.smallModelApiKey
       newConfig.smallModelMaxTokens = parseInt(maxTokens)
       // Save reasoning effort for small model if supported
@@ -647,6 +660,53 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     )
   }
 
+  // Render Base URL Input Screen for custom/ollama provider
+  if (currentScreen === 'baseURL') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box 
+          flexDirection="column" 
+          gap={1} 
+          borderStyle="round"
+          borderColor={theme.secondaryBorder}
+          paddingX={2}
+          paddingY={1}
+        >
+          <Text bold>
+            {selectedProvider === 'ollama' ? 'Ollama Base URL' : 'Custom Provider Base URL'} {exitState.pending ? `(press ${exitState.keyName} again to exit)` : ''}
+          </Text>
+          <Box flexDirection="column" gap={1}>
+            <Text bold>Enter your {selectedProvider === 'ollama' ? 'Ollama' : 'OpenAI-compatible'} API base URL:</Text>
+            <Box>
+              <TextInput
+                placeholder={selectedProvider === 'ollama' ? 'http://localhost:11434/v1' : 'https://your-api.example.com/v1'}
+                value={baseURL}
+                onChange={setBaseURL}
+                onSubmit={() => {
+                  if (selectedProvider === 'ollama') {
+                    fetchModels().catch(error => setModelLoadError(`Error loading models: ${error.message}`))
+                  } else {
+                    navigateTo('apiKey')
+                  }
+                }}
+                columns={100}
+                showCursor={true}
+                focus={true}
+                cursorOffset={baseUrlCursorOffset}
+                onChangeCursorOffset={setBaseUrlCursorOffset}
+              />
+            </Box>
+            <Box marginTop={1}>
+              <Text dimColor>
+                {selectedProvider === 'ollama' ? 'Press Enter to load models, or Esc to go back' : 'Press Enter to continue to API key input, or Esc to go back'}
+              </Text>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+    )
+  }
+
   // Render Model Selection Screen
   if (currentScreen === 'model') {
     const modelTypeText = modelTypeToChange === 'both' 
@@ -694,29 +754,48 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
               />
             </Box>
             
-            {modelOptions.length > 0 ? (
-              <>
-                <Select
-                  options={modelOptions}
-                  onChange={handleModelSelection}
+            {selectedProvider === 'custom' ? (
+              <Box flexDirection="column" gap={1}>
+                <Text bold>Enter model name manually (e.g., deepseek-chat, gpt-4o, llama-3.3-70b-versatile):</Text>
+                <TextInput
+                  placeholder="model-name"
+                  value={selectedModel}
+                  onChange={setSelectedModel}
+                  onSubmit={handleModelSelection}
+                  columns={100}
+                  showCursor={true}
+                  focus={true}
+                  cursorOffset={modelNameCursorOffset}
+                  onChangeCursorOffset={setModelNameCursorOffset}
                 />
-                <Text dimColor>
-                  Showing {modelOptions.length} of {availableModels.length} models
-                </Text>
-              </>
-            ) : (
-              <Box>
-                {availableModels.length > 0 ? (
-                  <Text color="yellow">No models match your search. Try a different query.</Text>
-                ) : (
-                  <Text color="yellow">No models available for this provider.</Text>
-                )}
               </Box>
+            ) : (
+              <>
+                {modelOptions.length > 0 ? (
+                  <>
+                    <Select
+                      options={modelOptions}
+                      onChange={handleModelSelection}
+                    />
+                    <Text dimColor>
+                      Showing {modelOptions.length} of {availableModels.length} models
+                    </Text>
+                  </>
+                ) : (
+                  <Box>
+                    {availableModels.length > 0 ? (
+                      <Text color="yellow">No models match your search. Try a different query.</Text>
+                    ) : (
+                      <Text color="yellow">No models available for this provider.</Text>
+                    )}
+                  </Box>
+                )}
+              </>
             )}
             
             <Box marginTop={1}>
               <Text dimColor>
-                Press <Text color={theme.suggestion}>Esc</Text> to go back to API key input
+                Press <Text color={theme.suggestion}>Esc</Text> to go back to {selectedProvider === 'custom' ? 'base URL' : 'API key'} input
               </Text>
             </Box>
           </Box>

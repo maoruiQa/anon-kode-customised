@@ -68,7 +68,7 @@ export function Config({ onClose }: Props): React.ReactNode {
       id: 'provider',
       label: 'AI Provider',
       value: globalConfig.primaryProvider ?? 'anthropic',
-      options: ['anthropic', 'openai', 'custom'],
+      options: ['anthropic', 'openai', 'openrouter', 'gemini', 'ollama', 'mistral', 'custom'],
       type: 'enum',
       onChange(provider: ProviderType) {
         const config = { ...getGlobalConfig(), primaryProvider: provider }

@@ -780,6 +780,10 @@ export default {
 
 
 export const providers = {
+  "custom": {
+    "name": "Custom (OpenAI-compatible)",
+    "baseURL": ""
+  },
   "openai": {
     "name": "OpenAI",
     "baseURL": "https://api.openai.com/v1"

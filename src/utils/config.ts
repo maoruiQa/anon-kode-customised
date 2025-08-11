@@ -88,6 +88,7 @@ export type NotificationChannel =
 export type ProviderType =
   | 'anthropic'
   | 'openai'
+  | 'openrouter'
   | 'mistral'
   | 'deepseek'
   | 'xai'
@@ -170,6 +171,22 @@ export const GLOBAL_CONFIG_KEYS = [
   'preferredNotifChannel',
   'shiftEnterKeyBindingInstalled',
   'maxTokens',
+  // Model/provider customization keys
+  'largeModelBaseURL',
+  'largeModelName',
+  'largeModelApiKeyRequired',
+  'largeModelApiKey',
+  'largeModelReasoningEffort',
+  'largeModelMaxTokens',
+  'smallModelBaseURL',
+  'smallModelName',
+  'smallModelApiKeyRequired',
+  'smallModelApiKey',
+  'smallModelReasoningEffort',
+  'smallModelMaxTokens',
+  // Networking & runtime
+  'proxy',
+  'stream',
 ] as const
 
 export type GlobalConfigKey = (typeof GLOBAL_CONFIG_KEYS)[number]
