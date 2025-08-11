@@ -1,3 +1,7 @@
+# Whats new?
+
+The third party API urls are now available. They take place of the ChatGPT API urls now.
+
 # ANON KODE
 
 
@@ -11,21 +15,20 @@ Terminal-based AI coding tool that can use any model that supports the OpenAI-st
 - Runs tests, shell commands and stuff
 - Whatever else claude-code can do, depending on the model you use
 
-## HOW TO USE
+
+
+## HOW TO DEPLOY
+
+make sure that you have installed bun:
 
 ```
-npm install -g anon-kode
-cd your-project
-kode
+curl -fsSL https://bun.sh/install | bash
 ```
 
-You can use the onboarding to set up the model, or `/model`.
-If you don't see the models you want on the list, you can manually set them in `/config`
-As long as you have an openai-like endpoint, it should work.
-
-## HOW TO DEV
-
+then deploy it:
 ```
+https://github.com/maoruiQa/anon-kode-customised.git
+cd anon-kode-customised
 pnpm i
 pnpm run dev
 pnpm run build
@@ -36,14 +39,17 @@ Get some more logs while debugging:
 NODE_ENV=development pnpm run dev --verbose --debug
 ```
 
+
+
+
 ## BUGS
 
-You can submit a bug from within the app with `/bug`, it will open a browser to github issue create with stuff filed out.
+You can submit a bug from within the app with `/bug`, it will open a browser to github issue create with stuff filed out. But I don't sure if I can solve that. Because I can't even code with Nodejs, and I improved this project even 100% through GPT5 in Cursor.
 
 ## Warning
 
 Use at own risk.
-
+If you find this project cool, please give me a star.
 
 ## YOUR DATA
 
