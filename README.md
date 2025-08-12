@@ -27,7 +27,7 @@ curl -fsSL https://bun.sh/install | bash
 
 then deploy it:
 ```
-https://github.com/maoruiQa/anon-kode-customised.git
+git clone https://github.com/maoruiQa/anon-kode-customised.git
 cd anon-kode-customised
 pnpm i
 pnpm run dev
