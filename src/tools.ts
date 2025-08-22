@@ -13,6 +13,7 @@ import { MemoryWriteTool } from './tools/MemoryWriteTool/MemoryWriteTool'
 import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool'
 import { NotebookReadTool } from './tools/NotebookReadTool/NotebookReadTool'
 import { ThinkTool } from './tools/ThinkTool/ThinkTool'
+import { TavilyTool } from './tools/TavilyTool/TavilyTool'
 import { getMCPTools } from './services/mcpClient'
 import { memoize } from 'lodash-es'
 
@@ -32,6 +33,7 @@ export const getAllTools = (): Tool[] => {
     NotebookReadTool,
     NotebookEditTool,
     ThinkTool,
+    TavilyTool,
     ...ANT_ONLY_TOOLS,
   ]
 }

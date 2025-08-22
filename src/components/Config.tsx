@@ -15,6 +15,8 @@ import { useExitOnCtrlCD } from '../hooks/useExitOnCtrlCD'
 
 type Props = {
   onClose: () => void
+  // Optionally focus a setting on open (e.g. 'tavilyApiKey' or 'tavilyEnabled')
+  initialSettingId?: string
 }
 
 type Setting =
@@ -52,7 +54,7 @@ type Setting =
       disabled?: boolean
     }
 
-export function Config({ onClose }: Props): React.ReactNode {
+export function Config({ onClose, initialSettingId }: Props): React.ReactNode {
   const [globalConfig, setGlobalConfig] = useState(getGlobalConfig())
   const initialConfig = React.useRef(getGlobalConfig())
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -224,6 +226,41 @@ export function Config({ onClose }: Props): React.ReactNode {
       },
     },
     {
+      id: 'proxy',
+      label: 'proxy used for http request',
+      value: globalConfig.proxy,
+      type: 'string',
+      onChange(value: string) {
+        const config = { ...getGlobalConfig(), proxy: value }
+        saveGlobalConfig(config)
+        setGlobalConfig(config)
+      },
+    },
+    // Tavily settings
+    {
+      id: 'tavilyEnabled',
+      label: 'Enable Tavily tool',
+      value: globalConfig.tavilyEnabled ?? true,
+      type: 'boolean',
+      onChange(value: boolean) {
+        const config = { ...getGlobalConfig(), tavilyEnabled: value }
+        saveGlobalConfig(config)
+        setGlobalConfig(config)
+      },
+    },
+    {
+      id: 'tavilyApiKey',
+      label: 'Tavily API key',
+      value: globalConfig.tavilyApiKey ?? '',
+      type: 'string',
+      disabled: getGlobalConfig().tavilyEnabled === false,
+      onChange(value: string) {
+        const config = { ...getGlobalConfig(), tavilyApiKey: value }
+        saveGlobalConfig(config)
+        setGlobalConfig(config)
+      },
+    },
+    {
       id: 'verbose',
       label: 'Verbose output',
       value: globalConfig.verbose,
@@ -278,6 +315,16 @@ export function Config({ onClose }: Props): React.ReactNode {
       },
     },
   ]
+
+  // Focus a particular setting on mount, if provided
+  React.useEffect(() => {
+    if (!initialSettingId) return
+    const idx = settings.findIndex(s => s.id === initialSettingId)
+    if (idx >= 0) {
+      setSelectedIndex(idx)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useInput((input, key) => {
     if (editingString) {

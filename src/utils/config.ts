@@ -142,6 +142,10 @@ export type GlobalConfig = {
   shiftEnterKeyBindingInstalled?: boolean
   proxy?: string
   stream?: boolean
+  // Third-party tool API keys
+  tavilyApiKey?: string
+  // Third-party tool toggles
+  tavilyEnabled?: boolean
 }
 
 export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
@@ -156,6 +160,7 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
     rejected: [],
   },
   stream: true,
+  tavilyEnabled: true,
 }
 
 export const GLOBAL_CONFIG_KEYS = [
@@ -187,6 +192,10 @@ export const GLOBAL_CONFIG_KEYS = [
   // Networking & runtime
   'proxy',
   'stream',
+  // Third-party tool API keys
+  'tavilyApiKey',
+  // Third-party tool toggles
+  'tavilyEnabled',
 ] as const
 
 export type GlobalConfigKey = (typeof GLOBAL_CONFIG_KEYS)[number]

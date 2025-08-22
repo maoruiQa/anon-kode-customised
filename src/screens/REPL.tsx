@@ -59,6 +59,7 @@ import { clearTerminal, updateTerminalTitle } from '../utils/terminal'
 import { BinaryFeedback } from '../components/binary-feedback/BinaryFeedback'
 import { getMaxThinkingTokens } from '../utils/thinking'
 import { getOriginalCwd } from '../utils/state'
+import { Config } from '../components/Config'
 
 type Props = {
   commands: Command[]
@@ -204,6 +205,19 @@ export function REPL({
     reverify()
 
     if (!initialPrompt) {
+      // If Tavily is enabled but API key is missing, prompt user to configure it
+      const cfg = getGlobalConfig()
+      if ((cfg.tavilyEnabled ?? true) && !cfg.tavilyApiKey) {
+        setToolJSX({
+          jsx: (
+            <Config
+              onClose={() => setToolJSX(null)}
+              initialSettingId="tavilyApiKey"
+            />
+          ),
+          shouldHidePromptInput: true,
+        })
+      }
       return
     }
 

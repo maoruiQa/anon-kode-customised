@@ -81,6 +81,7 @@ import { showInvalidConfigDialog } from '../components/InvalidConfigDialog'
 import { ConfigParseError } from '../utils/errors'
 import { grantReadPermissionForOriginalDir } from '../utils/permissions/filesystem'
 import { MACRO } from '../constants/macros'
+import { TavilyTool } from '../tools/TavilyTool/TavilyTool'
 export function completeOnboarding(): void {
   const config = getGlobalConfig()
   saveGlobalConfig({
@@ -727,6 +728,69 @@ ${commandList}`,
         render(<Doctor onDone={() => resolve()} doctorMode={true} />)
       })
       process.exit(0)
+    })
+
+  // tavily subcommand - direct web search via Tavily tool
+  program
+    .command('tavily')
+    .description('Run a web search using the Tavily tool')
+    .argument(
+      '<queryOrJson...>',
+      'Query string or a JSON object, e.g. {"query":"rust async streams", "maxResults": 5}',
+    )
+    .option('-c, --cwd <cwd>', 'The current working directory', String, cwd())
+    .option('--json', 'Output full JSON response', () => true)
+    .action(async (queryParts: string[], { cwd, json }) => {
+      await setup(cwd, false)
+
+      // Check gating (API key + enabled toggle)
+      if (!(await TavilyTool.isEnabled())) {
+        console.error(
+          'Tavily is not enabled. Set tavilyApiKey and ensure tavilyEnabled=true (use: config set -g tavilyApiKey <KEY>).',
+        )
+        process.exit(1)
+      }
+
+      const inputStr = (queryParts || []).join(' ').trim()
+      if (!inputStr) {
+        console.error('Usage: tavily <query> OR tavily {"query":"..."}')
+        process.exit(1)
+      }
+
+      let input: any
+      if (inputStr.startsWith('{')) {
+        try {
+          input = JSON.parse(inputStr)
+        } catch (e) {
+          console.error(`Invalid JSON input: ${(e as Error).message}`)
+          process.exit(1)
+        }
+      } else {
+        input = { query: inputStr }
+      }
+
+      try {
+        const abortController = new AbortController()
+        const gen = (TavilyTool.call as any)(input, { abortController })
+        let last: any
+        for await (const ev of gen) {
+          if (ev?.type === 'result') last = ev
+        }
+        if (!last) {
+          console.log('No results')
+          process.exit(0)
+        }
+        if (json) {
+          console.log(JSON.stringify(last.data, null, 2))
+        } else {
+          const text = TavilyTool.renderResultForAssistant(last.data)
+          console.log(text || 'No results')
+        }
+        process.exit(0)
+      } catch (e) {
+        console.error(`Error: ${(e as Error).message}`)
+        process.exit(1)
+      }
     })
 
   // ant-only commands
