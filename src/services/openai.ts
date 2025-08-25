@@ -1,4 +1,4 @@
-import { OpenAI } from "openai";
+import OpenAI from "openai";
 import { getGlobalConfig, GlobalConfig } from "../utils/config";
 import { ProxyAgent, fetch, Response } from 'undici'
 import { setSessionState, getSessionState } from "../utils/sessionState";
@@ -9,7 +9,8 @@ enum ModelErrorType {
   MaxCompletionTokens = 'max_completion_tokens',
   StreamOptions = 'stream_options',
   Citations = 'citations',
-  RateLimit = 'rate_limit'
+  RateLimit = 'rate_limit',
+  StreamingUnsupported = 'streaming_unsupported'
 }
 
 function getModelErrorKey(baseURL: string, model: string, type: ModelErrorType): string {
@@ -147,7 +148,27 @@ const ERROR_HANDLERS: ErrorHandler[] = [
         }
       }
     }
-  }
+  },
+  {
+    type: ModelErrorType.StreamingUnsupported,
+    detect: (errMsg) => {
+      if (!errMsg) return false
+      const lower = errMsg.toLowerCase()
+      // Common server-side streaming failure from Python servers (FastAPI/Starlette)
+      return (
+        lower.includes('body_iterator') ||
+        lower.includes('stream error') ||
+        lower.includes('streamingresponse') ||
+        lower.includes('server-sent events')
+      )
+    },
+    fix: async (opts) => {
+      // Disable streaming and remove unsupported options
+      // so we can retry with a regular (non-SSE) response
+      delete (opts as any).stream_options
+      ;(opts as any).stream = false
+    },
+  },
 ];
 
 // Rate limit specific detection
@@ -213,6 +234,57 @@ async function handleApiError(
   })
   
   throw new Error(`API request failed: ${error.error?.message || JSON.stringify(error)}`);
+}
+
+// Convert a non-stream ChatCompletion into a simple one-chunk stream
+function convertCompletionToStream(
+  completion: OpenAI.ChatCompletion,
+): AsyncGenerator<OpenAI.ChatCompletionChunk, void, unknown> {
+  return (async function* () {
+    try {
+      const choice = completion.choices?.[0]
+      const content = choice?.message?.content ?? ''
+      const tool_calls_full = choice?.message?.tool_calls ?? undefined
+
+      const chunk: OpenAI.ChatCompletionChunk = {
+        id: completion.id || 'synthetic',
+        object: 'chat.completion.chunk',
+        created: completion.created || Math.floor(Date.now() / 1000),
+        model: completion.model || 'unknown',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: 'assistant',
+              content: (typeof content === 'string') ? content : undefined,
+              // Emit tool_calls in streaming delta format with indices so reducer can rebuild
+              ...(Array.isArray(tool_calls_full)
+                ? {
+                    tool_calls: tool_calls_full.map((tc: any, i: number) => ({
+                      index: i,
+                      id: tc.id,
+                      type: tc.type || 'function',
+                      function: {
+                        name: tc.function?.name,
+                        arguments: tc.function?.arguments,
+                      },
+                    })),
+                  }
+                : {}),
+            },
+            finish_reason: 'stop',
+            logprobs: null as any,
+          },
+        ],
+        // Provide usage if available so downstream can compute costs
+        usage: (completion as any).usage,
+      }
+      yield chunk
+    } catch (e) {
+      console.error('Error converting completion to stream:', (e as any)?.message ?? e)
+      throw e
+    }
+  })()
 }
 
 export async function getCompletion(
@@ -290,15 +362,37 @@ export async function getCompletion(
       })
       
       if (!response.ok) {
+        // Try to capture the full error body (JSON or text) to detect server messages like 'body_iterator'
+        const rawText = await response.text().catch(() => '')
         try {
-          const error = await response.json() as { error?: { message: string }, message?: string }
+          const parsed = rawText ? JSON.parse(rawText) : undefined
+          const error = (parsed ?? { error: { message: rawText || `HTTP error ${response.status}: ${response.statusText}` } }) as { error?: { message: string }, message?: string }
           return handleApiError(response, error, type, opts, config, attempt, maxAttempts)
-        } catch (jsonError) {
-          // If we can't parse the error as JSON, use the status text
+        } catch {
           return handleApiError(
-            response, 
-            { error: { message: `HTTP error ${response.status}: ${response.statusText}` }}, 
-            type, opts, config, attempt, maxAttempts
+            response,
+            { error: { message: rawText || `HTTP error ${response.status}: ${response.statusText}` } },
+            type, opts, config, attempt, maxAttempts,
+          )
+        }
+      }
+
+      // If server didn't return SSE, fallback to non-stream handling
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.toLowerCase().includes('text/event-stream')) {
+        try {
+          const json = await response.json() as any
+          if (json && typeof json === 'object' && 'error' in json) {
+            return handleApiError(response, json, type, opts, config, attempt, maxAttempts)
+          }
+          const asCompletion = json as OpenAI.ChatCompletion
+          return convertCompletionToStream(asCompletion)
+        } catch (e) {
+          const rawText = await response.text().catch(() => '')
+          return handleApiError(
+            response,
+            { error: { message: rawText || 'Non-SSE response could not be parsed' } },
+            type, opts, config, attempt, maxAttempts,
           )
         }
       }
@@ -333,9 +427,13 @@ export async function getCompletion(
                     }
                     return // End this generator after yielding all chunks from error result
                   } else {
-                    // It's a regular completion, not a stream - we can't really use this in a streaming context
-                    // Just log it and continue with the original stream (skipping error chunks)
-                    console.warn('Error handler returned non-stream completion, continuing with original stream')
+                    // It's a regular completion, not a stream. Convert it into a synthetic stream
+                    // so the rest of the pipeline can continue consuming chunks.
+                    const synthetic = convertCompletionToStream(errorResult as OpenAI.ChatCompletion)
+                    for await (const errorChunk of synthetic) {
+                      yield errorChunk
+                    }
+                    return
                   }
                 }
                 
@@ -348,9 +446,30 @@ export async function getCompletion(
             yield chunk
           }
         } catch (e) {
-          console.error('Error in stream processing:', e.message)
-          // Rethrow to maintain error propagation
-          throw e
+          const msg = (e as any)?.message || String(e)
+          console.error('Error in stream processing:', msg)
+          // Attempt graceful fallback: retry without streaming
+          try {
+            const nonStreamOpts = { ...opts }
+            delete (nonStreamOpts as any).stream_options
+            ;(nonStreamOpts as any).stream = false
+            const fallback = await getCompletion(type, nonStreamOpts, attempt + 1, maxAttempts)
+            if (Symbol.asyncIterator in (fallback as any)) {
+              for await (const errorChunk of (fallback as AsyncIterable<OpenAI.ChatCompletionChunk>)) {
+                yield errorChunk
+              }
+              return
+            } else {
+              const synthetic = convertCompletionToStream(fallback as OpenAI.ChatCompletion)
+              for await (const errorChunk of synthetic) {
+                yield errorChunk
+              }
+              return
+            }
+          } catch (fallbackErr) {
+            // If fallback also fails, propagate original error
+            throw e
+          }
         }
       })()
     }
@@ -371,14 +490,15 @@ export async function getCompletion(
     })
     
     if (!response.ok) {
+      const rawText = await response.text().catch(() => '')
       try {
-        const error = await response.json() as { error?: { message: string }, message?: string }
+        const parsed = rawText ? JSON.parse(rawText) : undefined
+        const error = (parsed ?? { error: { message: rawText || `HTTP error ${response.status}: ${response.statusText}` } }) as { error?: { message: string }, message?: string }
         return handleApiError(response, error, type, opts, config, attempt, maxAttempts)
-      } catch (jsonError) {
-        // If we can't parse the error as JSON, use the status text
+      } catch {
         return handleApiError(
           response, 
-          { error: { message: `HTTP error ${response.status}: ${response.statusText}` }}, 
+          { error: { message: rawText || `HTTP error ${response.status}: ${response.statusText}` }}, 
           type, opts, config, attempt, maxAttempts
         )
       }
@@ -400,6 +520,7 @@ export async function getCompletion(
       return handleApiError(response, { error: errorValue }, type, opts, config, attempt, maxAttempts)
     }
     
+    // Return non-stream completion as-is (consumers expect an object when stream=false)
     return responseData
   } catch (error) {
     // Handle network errors or other exceptions
